@@ -195,15 +195,15 @@ class TrafficLightMonitor:
                     self.adaptive_params[lane]['red_hue_tolerance'] = 6
                     self.adaptive_params[lane]['green_hue_tolerance'] = 12
                 elif recent_brightness > 200:  # Very bright (midday sun)
-                    self.adaptive_params[lane]['min_saturation'] = 80
-                    self.adaptive_params[lane]['min_value'] = 80
-                    self.adaptive_params[lane]['red_hue_tolerance'] = 3
-                    self.adaptive_params[lane]['green_hue_tolerance'] = 8
-                else:  # Normal lighting
-                    self.adaptive_params[lane]['min_saturation'] = 50
-                    self.adaptive_params[lane]['min_value'] = 50
-                    self.adaptive_params[lane]['red_hue_tolerance'] = 5
+                    self.adaptive_params[lane]['min_saturation'] = 40
+                    self.adaptive_params[lane]['min_value'] = 40
+                    self.adaptive_params[lane]['red_hue_tolerance'] = 8
                     self.adaptive_params[lane]['green_hue_tolerance'] = 10
+                else:  # Normal lighting
+                    self.adaptive_params[lane]['min_saturation'] = 30
+                    self.adaptive_params[lane]['min_value'] = 30
+                    self.adaptive_params[lane]['red_hue_tolerance'] = 8
+                    self.adaptive_params[lane]['green_hue_tolerance'] = 12
 
     def _get_adaptive_color_intensity(self, frame: np.ndarray, roi: List[Tuple[int, int]], color: str, lane: int) -> float:
         """
