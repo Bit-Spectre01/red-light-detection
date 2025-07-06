@@ -84,21 +84,32 @@ class Vehicle:
 class TrafficLightMonitor:
     def __init__(self, roi_config: Dict):
         """
-        Initialize traffic light monitoring.
+        Initialize traffic light monitoring with adaptive lighting support.
         
         Args:
             roi_config: ROI configuration containing light positions
         """
         self.roi_config = roi_config
         self.light_states = {}  # lane -> state history
-        self.state_history_length = 10  # Frames to smooth over
+        self.state_history_length = 15  # Frames to smooth over (increased for stability)
+        self.brightness_history = {}  # lane -> brightness values for adaptation
+        self.adaptive_params = {}  # lane -> adaptive detection parameters
         
         for lane_num in roi_config.keys():
-            self.light_states[int(lane_num)] = deque(maxlen=self.state_history_length)
+            lane_key = int(lane_num)
+            self.light_states[lane_key] = deque(maxlen=self.state_history_length)
+            self.brightness_history[lane_key] = deque(maxlen=30)  # 30 frames for brightness tracking
+            self.adaptive_params[lane_key] = {
+                'brightness_factor': 1.0,
+                'red_hue_tolerance': 5,  # Additional tolerance for red hue
+                'green_hue_tolerance': 10,  # Additional tolerance for green hue
+                'min_saturation': 50,
+                'min_value': 50
+            }
             
     def detect_light_state(self, frame: np.ndarray, lane: int) -> str:
         """
-        Detect traffic light state for a specific lane.
+        Detect traffic light state for a specific lane with adaptive lighting support.
         
         Args:
             frame: Current video frame
@@ -115,18 +126,25 @@ class TrafficLightMonitor:
         red_roi = lane_config.get("red_light", [])
         green_roi = lane_config.get("green_light", [])
         
+        self._update_adaptive_parameters(frame, lane, red_roi, green_roi)
+        
         red_intensity = 0
         green_intensity = 0
         
         if red_roi:
-            red_intensity = self._get_color_intensity(frame, red_roi, "red")
+            red_intensity = self._get_adaptive_color_intensity(frame, red_roi, "red", lane)
             
         if green_roi:
-            green_intensity = self._get_color_intensity(frame, green_roi, "green")
+            green_intensity = self._get_adaptive_color_intensity(frame, green_roi, "green", lane)
             
-        if red_intensity > green_intensity and red_intensity > 50:
+        base_threshold = 30  # Lowered base threshold for better sensitivity
+        adaptive_threshold = base_threshold * max(0.5, self.adaptive_params[lane]['brightness_factor'])
+        
+        min_absolute_threshold = 20
+        
+        if red_intensity > green_intensity and red_intensity > max(adaptive_threshold, min_absolute_threshold):
             state = "red"
-        elif green_intensity > red_intensity and green_intensity > 50:
+        elif green_intensity > red_intensity and green_intensity > max(adaptive_threshold, min_absolute_threshold):
             state = "green"
         else:
             state = "unknown"
@@ -134,14 +152,68 @@ class TrafficLightMonitor:
         self.light_states[lane].append(state)
         return self._get_smoothed_state(lane)
         
-    def _get_color_intensity(self, frame: np.ndarray, roi: List[Tuple[int, int]], color: str) -> float:
+    def _update_adaptive_parameters(self, frame: np.ndarray, lane: int, red_roi: List, green_roi: List):
         """
-        Get color intensity in ROI.
+        Update adaptive parameters based on current lighting conditions.
+        
+        Args:
+            frame: Current video frame
+            lane: Lane number
+            red_roi: Red light ROI points
+            green_roi: Green light ROI points
+        """
+        brightness_values = []
+        
+        for roi in [red_roi, green_roi]:
+            if roi and len(roi) >= 3:
+                mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+                pts = np.array(roi, np.int32)
+                cv2.fillPoly(mask, [pts], 255)
+                
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                roi_pixels = gray[mask > 0]
+                if len(roi_pixels) > 0:
+                    brightness_values.append(np.mean(roi_pixels))
+        
+        if brightness_values:
+            avg_brightness = np.mean(brightness_values)
+            self.brightness_history[lane].append(avg_brightness)
+            
+            if len(self.brightness_history[lane]) >= 10:
+                recent_brightness = np.mean(list(self.brightness_history[lane])[-10:])
+                
+                self.adaptive_params[lane]['brightness_factor'] = max(0.3, min(2.5, recent_brightness / 128.0))
+                
+                if recent_brightness < 60:  # Very low light (dawn/dusk)
+                    self.adaptive_params[lane]['min_saturation'] = 25
+                    self.adaptive_params[lane]['min_value'] = 25
+                    self.adaptive_params[lane]['red_hue_tolerance'] = 8
+                    self.adaptive_params[lane]['green_hue_tolerance'] = 15
+                elif recent_brightness < 100:  # Low light
+                    self.adaptive_params[lane]['min_saturation'] = 35
+                    self.adaptive_params[lane]['min_value'] = 35
+                    self.adaptive_params[lane]['red_hue_tolerance'] = 6
+                    self.adaptive_params[lane]['green_hue_tolerance'] = 12
+                elif recent_brightness > 200:  # Very bright (midday sun)
+                    self.adaptive_params[lane]['min_saturation'] = 80
+                    self.adaptive_params[lane]['min_value'] = 80
+                    self.adaptive_params[lane]['red_hue_tolerance'] = 3
+                    self.adaptive_params[lane]['green_hue_tolerance'] = 8
+                else:  # Normal lighting
+                    self.adaptive_params[lane]['min_saturation'] = 50
+                    self.adaptive_params[lane]['min_value'] = 50
+                    self.adaptive_params[lane]['red_hue_tolerance'] = 5
+                    self.adaptive_params[lane]['green_hue_tolerance'] = 10
+
+    def _get_adaptive_color_intensity(self, frame: np.ndarray, roi: List[Tuple[int, int]], color: str, lane: int) -> float:
+        """
+        Get color intensity in ROI with adaptive color detection for changing lighting.
         
         Args:
             frame: Video frame
             roi: Region of interest polygon points
             color: "red" or "green"
+            lane: Lane number for adaptive parameters
             
         Returns:
             Color intensity value
@@ -155,42 +227,80 @@ class TrafficLightMonitor:
         
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         
+        params = self.adaptive_params[lane]
+        min_sat = params['min_saturation']
+        min_val = params['min_value']
+        
         if color == "red":
-            lower_red1 = np.array([0, 50, 50])
-            upper_red1 = np.array([10, 255, 255])
-            lower_red2 = np.array([170, 50, 50])
+            red_tolerance = params['red_hue_tolerance']
+            lower_red1 = np.array([0, max(20, min_sat - 10), max(20, min_val - 10)])
+            upper_red1 = np.array([min(180, 15 + red_tolerance), 255, 255])
+            lower_red2 = np.array([max(0, 165 - red_tolerance), max(20, min_sat - 10), max(20, min_val - 10)])
             upper_red2 = np.array([180, 255, 255])
             
             mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
             mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
             color_mask = cv2.bitwise_or(mask1, mask2)
         else:  # green
-            lower_green = np.array([40, 50, 50])
-            upper_green = np.array([80, 255, 255])
+            green_tolerance = params['green_hue_tolerance']
+            lower_green = np.array([max(0, 35 - green_tolerance), max(20, min_sat - 10), max(20, min_val - 10)])
+            upper_green = np.array([min(180, 85 + green_tolerance), 255, 255])
             color_mask = cv2.inRange(hsv, lower_green, upper_green)
             
         combined_mask = cv2.bitwise_and(mask, color_mask)
         
         intensity = np.sum(combined_mask) / 255.0
-        return intensity
+        
+        compensated_intensity = intensity * params['brightness_factor']
+        
+        return min(compensated_intensity, 1000.0)  # Cap at reasonable maximum
+
+    def _get_color_intensity(self, frame: np.ndarray, roi: List[Tuple[int, int]], color: str) -> float:
+        """
+        Legacy method for backward compatibility - uses adaptive detection with default lane.
+        """
+        default_lane = list(self.roi_config.keys())[0] if self.roi_config else 1
+        return self._get_adaptive_color_intensity(frame, roi, color, default_lane)
         
     def _get_smoothed_state(self, lane: int) -> str:
-        """Get smoothed traffic light state using temporal filtering."""
+        """Get smoothed traffic light state using enhanced temporal filtering for stability."""
         if lane not in self.light_states or len(self.light_states[lane]) == 0:
             return "unknown"
             
         states = list(self.light_states[lane])
         
-        red_count = states.count("red")
-        green_count = states.count("green")
-        unknown_count = states.count("unknown")
-        
-        if red_count >= green_count and red_count >= unknown_count:
-            return "red"
-        elif green_count >= red_count and green_count >= unknown_count:
-            return "green"
+        if len(states) >= 8:  # Need sufficient history for reliable smoothing
+            red_count = states.count("red")
+            green_count = states.count("green")
+            unknown_count = states.count("unknown")
+            
+            total_states = len(states)
+            
+            # Require stronger consensus (60%) for definitive state detection
+            red_ratio = red_count / total_states
+            green_ratio = green_count / total_states
+            
+            if red_ratio >= 0.6:
+                return "red"
+            elif green_ratio >= 0.6:
+                return "green"
+            elif red_ratio >= 0.4 and red_ratio > green_ratio:
+                return "red"  # Lean towards red for safety
+            elif green_ratio >= 0.4 and green_ratio > red_ratio:
+                return "green"
+            else:
+                return "unknown"  # Conservative approach during uncertain periods
         else:
-            return "unknown"
+            states = list(self.light_states[lane])
+            red_count = states.count("red")
+            green_count = states.count("green")
+            
+            if red_count > green_count:
+                return "red"
+            elif green_count > red_count:
+                return "green"
+            else:
+                return "unknown"
 
 
 class ViolationDetector:
