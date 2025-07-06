@@ -1,0 +1,47 @@
+# Output directories
+output/
+test_output/
+videos/
+test_config/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Model files
+*.pt
+*.onnx
+*.engine
+
+# Video files
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.wmv
+
+# Log files
+*.log
+
+# Temporary files
+*.tmp
+*.temp
