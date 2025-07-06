@@ -165,12 +165,17 @@ def main():
         print("=== BUILD SUCCESSFUL ===")
         print()
         print("Your executable is ready:")
-        print("📁 Location: dist/RedLightDetection.exe")
+        if os.name == 'nt':  # Windows
+            print("📁 Location: dist/RedLightDetection/RedLightDetection.exe")
+            exe_name = "RedLightDetection.exe"
+        else:  # Linux/Unix
+            print("📁 Location: dist/RedLightDetection/RedLightDetection")
+            exe_name = "RedLightDetection"
         print()
         print("Usage:")
         print("1. Copy the entire 'dist' folder to your target machine")
-        print("2. Run: RedLightDetection.exe --help")
-        print("3. Example: RedLightDetection.exe --video sample.mp4")
+        print(f"2. Run: {exe_name} --help")
+        print(f"3. Example: {exe_name} --video sample.mp4")
         print()
         print("Note: The executable includes all dependencies and the YOLO model.")
         return 0

@@ -1,15 +1,31 @@
 # Red Light Detection System - Executable Usage
 
 ## Overview
-This document explains how to use the standalone executable version of the Red Light Detection System.
+This document explains how to create and use the standalone executable version of the Red Light Detection System.
+
+## Building the Executable
+
+### For Windows (.exe)
+To create a Windows executable, run the build script on a Windows machine:
+
+1. Install Python 3.8+ and pip on Windows
+2. Install dependencies: `pip install -r requirements.txt`
+3. Install PyInstaller: `pip install pyinstaller`
+4. Run the build script: `python build_exe.py`
+5. The executable will be created in `dist/RedLightDetection/RedLightDetection.exe`
+
+### For Linux
+The current build creates a Linux executable:
+1. Run: `python build_exe.py`
+2. Executable created at: `dist/RedLightDetection/RedLightDetection`
 
 ## System Requirements
-- Windows 10/11 (64-bit)
+- Windows 10/11 (64-bit) or Linux (64-bit)
 - Minimum 4GB RAM (8GB recommended for large videos)
-- 1GB free disk space for temporary files and output
+- 6GB free disk space for executable and temporary files
 
 ## Installation
-1. Download the `dist` folder containing `RedLightDetection.exe`
+1. Download the `dist` folder containing the executable
 2. No additional installation required - all dependencies are bundled
 
 ## Usage
