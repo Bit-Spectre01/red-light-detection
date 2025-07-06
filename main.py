@@ -73,19 +73,19 @@ class RedLightDetectionSystem:
         print(f"Processing video: {video_path}")
         print(f"Using ROI config: {roi_config_path}")
         
-        try:
-            detector = ViolationDetector(roi_config_path, self.output_dir, video_name)
-            logger = ViolationLogger(self.output_dir, video_name)
-        except Exception as e:
-            print(f"Error initializing detector: {e}")
-            return False
-            
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             print(f"Error: Could not open video file {video_path}")
             return False
             
         fps = int(cap.get(cv2.CAP_PROP_FPS))
+        
+        try:
+            detector = ViolationDetector(roi_config_path, self.output_dir, video_name)
+            logger = ViolationLogger(self.output_dir, video_name, fps)
+        except Exception as e:
+            print(f"Error initializing detector: {e}")
+            return False
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -115,6 +115,8 @@ class RedLightDetectionSystem:
                         
                     frame_count += 1
                     
+                    logger.add_frame_to_buffer(frame)
+                    
                     annotated_frame, violations = detector.process_frame(frame)
                     
                     for violation in violations:
@@ -133,12 +135,21 @@ class RedLightDetectionSystem:
                         
                         cv2.imwrite(screenshot_path, frame)
                         
+                        video_path = logger.create_violation_video(
+                            violation['lane'],
+                            violation['vehicle_id'],
+                            violation['movement_type'],
+                            timestamp,
+                            len(logger.frame_buffer) - 1  # Current frame index in buffer
+                        )
+                        
                         logger.log_violation(
                             lane=violation['lane'],
                             vehicle_id=violation['vehicle_id'],
                             movement_type=violation['movement_type'],
                             violation_type=violation['violation_type'],
                             screenshot_path=screenshot_path,
+                            video_path=video_path,
                             timestamp=timestamp
                         )
                         

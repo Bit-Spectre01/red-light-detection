@@ -59,7 +59,7 @@ def test_logger():
     """Test the violation logger."""
     print("Testing violation logger...")
     
-    logger = ViolationLogger("test_output", "test_video")
+    logger = ViolationLogger("test_output", "test_video", fps=30)
     
     screenshot_path = logger.get_screenshot_path(1, 123, "Straight Through")
     logger.log_violation(
@@ -67,7 +67,8 @@ def test_logger():
         vehicle_id=123,
         movement_type="Straight Through",
         violation_type="Red Light Violation",
-        screenshot_path=screenshot_path
+        screenshot_path=screenshot_path,
+        video_path="test_output/test_video/Straight Through/Lane1Vehicle123_20250706_045033_violation.mp4"
     )
     
     logger.print_summary()

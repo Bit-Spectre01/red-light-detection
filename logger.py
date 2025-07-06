@@ -13,22 +13,28 @@ This module handles CSV logging of violations with the following columns:
 import csv
 import os
 import datetime
-from typing import Dict, Any, Optional
+import cv2
+import numpy as np
+from typing import Dict, Any, Optional, List
 
 
 class ViolationLogger:
-    def __init__(self, output_dir: str, video_name: str):
+    def __init__(self, output_dir: str, video_name: str, fps: int = 30):
         """
         Initialize violation logger.
         
         Args:
             output_dir: Base output directory
             video_name: Name of video being processed
+            fps: Video frame rate for timing calculations
         """
         self.output_dir = output_dir
         self.video_name = video_name
         self.video_output_dir = os.path.join(output_dir, video_name)
         self.csv_path = os.path.join(self.video_output_dir, "violations.csv")
+        self.fps = fps
+        self.frame_buffer = []  # Buffer to store recent frames for violation videos
+        self.buffer_size = fps * 10  # 10 seconds of frames
         
         os.makedirs(self.video_output_dir, exist_ok=True)
         os.makedirs(os.path.join(self.video_output_dir, "Right Turn"), exist_ok=True)
@@ -48,15 +54,91 @@ class ViolationLogger:
                     'vehicle_id',
                     'movement_type',
                     'violation_type',
-                    'screenshot_path'
+                    'screenshot_path',
+                    'video_path'
                 ])
                 
+    def add_frame_to_buffer(self, frame: np.ndarray):
+        """
+        Add frame to the circular buffer for violation video creation.
+        
+        Args:
+            frame: Video frame to add to buffer
+        """
+        self.frame_buffer.append(frame.copy())
+        if len(self.frame_buffer) > self.buffer_size:
+            self.frame_buffer.pop(0)
+    
+    def create_violation_video(self, 
+                              lane: int,
+                              vehicle_id: int,
+                              movement_type: str,
+                              timestamp: datetime.datetime,
+                              violation_frame_index: int) -> str:
+        """
+        Create a 10-second violation video (5 seconds before/after violation).
+        
+        Args:
+            lane: Lane number
+            vehicle_id: Vehicle ID
+            movement_type: Movement type for subdirectory
+            timestamp: Timestamp for filename
+            violation_frame_index: Index of violation frame in buffer
+            
+        Returns:
+            Path to created video file
+        """
+        if len(self.frame_buffer) < self.fps * 5:  # Need at least 5 seconds of frames
+            return ""
+            
+        timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
+        filename = f"Lane{lane}Vehicle{vehicle_id}_{timestamp_str}_violation.mp4"
+        video_path = os.path.join(
+            self.video_output_dir,
+            movement_type,
+            filename
+        )
+        
+        start_frame = max(0, violation_frame_index - self.fps * 5)
+        end_frame = min(len(self.frame_buffer), violation_frame_index + self.fps * 5)
+        
+        if end_frame - start_frame < self.fps * 5:  # Not enough frames
+            return ""
+            
+        height, width = self.frame_buffer[0].shape[:2]
+        
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        video_writer = cv2.VideoWriter(video_path, fourcc, self.fps, (width, height))
+        
+        try:
+            for i in range(start_frame, end_frame):
+                if i < len(self.frame_buffer):
+                    frame = self.frame_buffer[i].copy()
+                    
+                    if i == violation_frame_index:
+                        cv2.putText(frame, "VIOLATION DETECTED", (50, 50), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3)
+                        cv2.rectangle(frame, (40, 20), (400, 70), (0, 0, 255), 3)
+                    
+                    frame_time = timestamp - datetime.timedelta(seconds=(violation_frame_index - i) / self.fps)
+                    time_str = frame_time.strftime("%H:%M:%S.%f")[:-3]
+                    cv2.putText(frame, time_str, (width - 200, height - 30), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                    
+                    video_writer.write(frame)
+                    
+        finally:
+            video_writer.release()
+            
+        return video_path
+
     def log_violation(self, 
                      lane: int,
                      vehicle_id: int, 
                      movement_type: str,
                      violation_type: str,
                      screenshot_path: str,
+                     video_path: str = "",
                      timestamp: Optional[datetime.datetime] = None):
         """
         Log a violation to the CSV file.
@@ -67,6 +149,7 @@ class ViolationLogger:
             movement_type: "Straight Through", "Left Turn", or "Right Turn"  
             violation_type: Type of violation (e.g., "Red Light Violation")
             screenshot_path: Path to evidence screenshot
+            video_path: Path to violation video clip
             timestamp: Timestamp of violation (defaults to current time)
         """
         if timestamp is None:
@@ -82,10 +165,13 @@ class ViolationLogger:
                 vehicle_id, 
                 movement_type,
                 violation_type,
-                screenshot_path
+                screenshot_path,
+                video_path
             ])
             
         print(f"Logged violation: Lane {lane}, Vehicle {vehicle_id}, {violation_type}")
+        if video_path:
+            print(f"  Video evidence: {video_path}")
         
     def get_screenshot_path(self, 
                            lane: int,
